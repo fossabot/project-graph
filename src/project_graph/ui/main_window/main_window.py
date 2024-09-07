@@ -3,11 +3,10 @@ import platform
 import subprocess
 from functools import partial
 from pathlib import Path
-from threading import Thread
-from uuid import uuid4
 
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import (
+    QColor,
     QDragEnterEvent,
     QFont,
     QIcon,
@@ -20,6 +19,7 @@ from PyQt5.QtWidgets import (
     QDesktopWidget,
     QDialog,
     QFileDialog,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -27,10 +27,14 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
-from project_graph.ai.doubao import Doubao
+from project_graph.ai.ai_provider import AIProvider
+from project_graph.ai.doubao_provider import DoubaoProvider
+from project_graph.ai.openai_provider import OpenAIProvider
+from project_graph.ai.request_thread import AIRequestThread
 from project_graph.app_dir import DATA_DIR
 from project_graph.camera import Camera
 from project_graph.data_struct.number_vector import NumberVector
+from project_graph.effect.effect_concrete import EffectViewFlash
 from project_graph.effect.effect_manager import EffectManager
 from project_graph.entity.entity_node import EntityNode
 from project_graph.entity.node_link import NodeLink
@@ -42,12 +46,14 @@ from project_graph.settings.setting_service import SETTING_SERVICE
 from project_graph.status_text.status_text import STATUS_TEXT
 from project_graph.toolbar.toolbar import Toolbar
 from project_graph.ui.panel_about import show_about_panel
+from project_graph.ui.panel_ai_settings import show_ai_settings
 from project_graph.ui.panel_export_text import show_text_export_dialog
 from project_graph.ui.panel_help import show_help_panel
 from project_graph.ui.panel_import_text import show_text_import_dialog
 from project_graph.ui.panel_performence_settings import show_performance_settings
 from project_graph.ui.panel_physics_settings import show_physics_settings
 from project_graph.ui.panel_serialize_test import show_serialize_dialog
+from project_graph.ui.panel_update import show_update_panel
 from project_graph.ui.panel_visual_settings import show_visual_settings
 
 from . import (
@@ -79,6 +85,10 @@ class Canvas(QMainWindow):
         self.node_manager = NodeManager()
         self.recent_file_manager = RecentFileManager()
         self.toolbar: Toolbar = Toolbar()
+
+        self.on_open_file_by_path(
+            str(self.node_manager.file_path), record_history=False
+        )  # 一开始打开初始欢迎文件
 
         # ====== 鼠标事件相关
         self.is_pressing = False
@@ -153,8 +163,11 @@ class Canvas(QMainWindow):
                     LAction(
                         title="打开新图", action=self.on_open_file, shortcut="Ctrl+O"
                     ),
+                    LAction(title="保存", action=self.on_save_file, shortcut="Ctrl+S"),
                     LAction(
-                        title="保存当前图", action=self.on_save_file, shortcut="Ctrl+S"
+                        title="另存为",
+                        action=self.on_save_as_new_file,
+                        shortcut="Ctrl+Shift+S",
                     ),
                     LAction(
                         title="打开曾经保存的",
@@ -177,6 +190,7 @@ class Canvas(QMainWindow):
                     LAction(title="帮助说明", action=show_help_panel),
                     LAction(title="关于", action=show_about_panel),
                     LAction(title="打开缓存文件夹", action=self.open_cache_folder),
+                    LAction(title="检查更新", action=show_update_panel),
                 ),
             ),
             LMenu(
@@ -185,11 +199,42 @@ class Canvas(QMainWindow):
                     LAction(title="显示设置", action=show_visual_settings),
                     LAction(title="物理设置", action=show_physics_settings),
                     LAction(title="性能设置", action=show_performance_settings),
+                    LAction(title="AI设置", action=show_ai_settings),
                     LAction(title="将设置保存", action=SETTING_SERVICE.save_settings),
                 ),
             ),
             LMenu(
-                title="AI", children=(LAction(title="测试", action=self.on_ai_test),)
+                title="AI",
+                children=(
+                    LAction(
+                        title="豆包", action=partial(self.request_ai, DoubaoProvider())
+                    ),
+                    LAction(
+                        title="gpt-4o-mini",
+                        action=partial(
+                            self.request_ai, OpenAIProvider(), "gpt-4o-mini"
+                        ),
+                    ),
+                    LAction(
+                        title="net-gpt-3.5-turbo",
+                        action=partial(
+                            self.request_ai, OpenAIProvider(), "net-gpt-3.5-turbo"
+                        ),
+                    ),
+                    LAction(
+                        title=SETTING_SERVICE.custom_ai_model or "自定义模型",
+                        enabled=SETTING_SERVICE.custom_ai_model != "",
+                        action=partial(
+                            self.request_ai,
+                            OpenAIProvider(),
+                            SETTING_SERVICE.custom_ai_model,
+                        ),
+                    ),
+                    LAction(
+                        title="设置自定义 OpenAI 模型",
+                        action=self.custom_ai_model,
+                    ),
+                ),
             ),
             LMenu(
                 title="测试",
@@ -321,7 +366,7 @@ class Canvas(QMainWindow):
         # 显示对话框
         dialog.exec_()
 
-    def on_open_file_by_path(self, file_path: str):
+    def on_open_file_by_path(self, file_path: str, record_history=True):
         """
         根据文件路径打开文件
         """
@@ -329,7 +374,9 @@ class Canvas(QMainWindow):
         with open(file_path, "r", encoding="utf-8") as f:
             load_data = json.loads(f.read())
             self.node_manager.load_from_dict(load_data)
-            self.recent_file_manager.add_recent_file(Path(file_path))
+            self.node_manager.file_path = Path(file_path)
+            if record_history:
+                self.recent_file_manager.add_recent_file(Path(file_path))
         self.node_manager.progress_recorder.reset()
 
     def on_open_file(self):
@@ -342,12 +389,27 @@ class Canvas(QMainWindow):
         self.on_open_file_by_path(file_path)
 
     def on_save_file(self):
+        """保存"""
+        # 意外情况：如果node manager 的path属性没有找到文件，则会报错
+        if not self.node_manager.file_path.exists():
+            self.on_save_as_new_file()
+            return
+        else:
+            with open(self.node_manager.file_path, "w") as f:
+                save_data: dict = self.node_manager.dump_all()
+                json.dump(save_data, f)
+            self.node_manager.progress_recorder.reset()
+            self.effect_manager.add_effect(EffectViewFlash(30, QColor(0, 0, 0)))
+
+            self.camera.release_move(NumberVector(0, -1))
+
+    def on_save_as_new_file(self):
+        """另存为"""
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "保存文件", "", "JSON Files (*.json);;All Files (*)"
+            self, "另存为", "", "JSON Files (*.json);;All Files (*)"
         )
         if file_path:
-            # 如果用户选择了文件并点击了保存按钮
-            # 保存布局文件
+            # 如果用户选择了文件并点击了另存为按钮
             save_data: dict = self.node_manager.dump_all()
 
             # 确保文件扩展名为 .json
@@ -359,7 +421,7 @@ class Canvas(QMainWindow):
             self.recent_file_manager.add_recent_file(Path(file_path))
             self.node_manager.progress_recorder.reset()
         else:
-            # 如果用户取消了保存操作
+            # 如果用户取消了另存为操作
             log("Save operation cancelled.")
 
     def reset_view(self):
@@ -379,23 +441,13 @@ class Canvas(QMainWindow):
         assert clip is not None
         clip.setText(str(self.camera.location))
 
-    def on_ai_test(self):
-        """测试AI"""
-        instance = Doubao()
-        res = ""
+    def request_ai(self, provider: AIProvider, *args):
         selected_nodes = [node for node in self.node_manager.nodes if node.is_selected]
+        thread = None
 
-        def run():
-            nonlocal res
-            res = instance.generate_node(self.node_manager)
-            log(res)
-            nodes = json.loads(res)
+        def on_finished(nodes):
+            nonlocal thread
             for dic in nodes:
-                dic["body_shape"]["width"] = 100
-                dic["body_shape"]["height"] = 100
-                dic["details"] = dic["details"].replace("$$$", "\n")
-                dic["uuid"] = str(uuid4())
-                dic["children"] = []
                 self.node_manager.add_from_dict(
                     {"nodes": [dic]},
                     NumberVector(
@@ -407,10 +459,35 @@ class Canvas(QMainWindow):
                 entity_node = self.node_manager.get_node_by_uuid(dic["uuid"])
                 assert entity_node is not None
                 for node in selected_nodes:
-                    log(node)
                     self.node_manager.connect_node(node, entity_node)
+            # 线程执行完毕后，销毁 `self.thread`
+            thread = None
 
-        Thread(target=run).start()
+        def on_error(error_message):
+            nonlocal thread
+            QMessageBox.critical(self, "AI 请求失败", error_message)
+            # 出错时，也销毁 `self.thread`
+            thread = None
+
+        if thread is None:  # 确保没有线程在运行
+            thread = AIRequestThread(provider, self.node_manager, *args)
+            thread.finished.connect(on_finished)
+            thread.error.connect(on_error)
+            thread.start()
+
+    def custom_ai_model(self):
+        """自定义 OpenAI 模型"""
+        # 弹窗让用户输入模型名称
+        text, ok = QInputDialog.getText(
+            self,
+            "输入模型名称",
+            "请输入模型名称 (例如 gpt-4o-mini)",
+            text=SETTING_SERVICE.custom_ai_model,
+        )
+        if ok:
+            SETTING_SERVICE.custom_ai_model = text
+            SETTING_SERVICE.save_settings()
+            self.init_ui()
 
     def dragEnterEvent(self, a0: QDragEnterEvent | None):
         assert a0 is not None
@@ -446,6 +523,11 @@ class Canvas(QMainWindow):
     def tick(self):
         self.effect_manager.tick()
         self.camera.tick()
+        # 把camera里的特效加到effect_manager里
+        for effect in self.camera.prepare_effect:
+            self.effect_manager.add_effect(effect)
+        self.camera.prepare_effect.clear()
+
         # 更新鼠标手势
         if Qt.Key.Key_Space in self.pressing_keys:
             if self.is_pressing:

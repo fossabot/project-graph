@@ -50,6 +50,13 @@ class SettingService:
         """
         历史记录最大数量
         """
+
+        self.custom_ai_model = ""
+        """自定义模型"""
+
+        self.ark_api_key = ""
+        self.openai_api_key = ""
+        self.openai_api_base = ""
         pass
 
     def __dict__(self):
@@ -67,6 +74,10 @@ class SettingService:
             "camera_move_friction": self.camera_move_friction,
             "is_node_details_show_always": self.is_node_details_show_always,
             "history_max_size": self.history_max_size,
+            "custom_ai_model": self.custom_ai_model,
+            "ark_api_key": self.ark_api_key,
+            "openai_api_key": self.openai_api_key,
+            "openai_api_base": self.openai_api_base,
         }
 
     def to_json_string(self):
@@ -105,6 +116,10 @@ class SettingService:
                     "is_node_details_show_always", False
                 )
                 self.history_max_size = settings.get("history_max_size", 20)
+                self.custom_ai_model = settings.get("custom_ai_model", "")
+                self.ark_api_key = settings.get("ark_api_key", "")
+                self.openai_api_key = settings.get("openai_api_key", "")
+                self.openai_api_base = settings.get("openai_api_base", "")
 
     def save_settings(self):
         """

@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from PyQt5.QtGui import QColor
 
+from project_graph.app_dir import DATA_DIR
 from project_graph.data_struct.circle import Circle
 from project_graph.data_struct.number_vector import NumberVector
 from project_graph.data_struct.rectangle import Rectangle
@@ -10,6 +13,7 @@ from project_graph.paint.paintables import PaintContext
 from project_graph.settings.setting_service import SETTING_SERVICE
 from project_graph.settings.style_service import STYLE_SERVICE
 
+from . import node_dict_checker
 from .node_progress_recorder import NodeProgressRecorder
 from .node_text_exporter import NodeTextExporter
 from .node_text_importer import NodeTextImporter
@@ -71,7 +75,23 @@ class NodeManager:
         self.press_ctrl_c_location = NumberVector(0, 0)
         """上次按下Ctrl+C的鼠标世界位置"""
 
+        self.file_path = Path(DATA_DIR) / "welcome.json"
+        """当前打开的文件路径"""
+
+        # == 初始化 ==
+        # 如果没有文件就先保存一个文件
+        if not self.file_path.exists():
+            self.save_file()
+        # 加载默认
+        # 在上层 main window调用
+
         pass
+
+    def save_file(self):
+        import json
+
+        with open(self.file_path, "w") as f:
+            f.write(json.dumps(self.dump_all(), indent=4))
 
     def move_cursor(self, direction: str):
         """
@@ -273,26 +293,16 @@ class NodeManager:
         """
         if refresh_uuid:
             data = self._refresh_all_uuid(data)
-        # 验证数据格式
-        assert isinstance(data, dict)
-        assert isinstance(data.get("nodes"), list)
-        for i in data["nodes"]:
-            assert isinstance(i, dict)
-            assert isinstance(i.get("body_shape"), dict)
-            assert isinstance(i["body_shape"].get("type"), str)
-            assert isinstance(i["body_shape"].get("location_left_top"), list)
-            assert len(i["body_shape"]["location_left_top"]) == 2
-            assert isinstance(i["body_shape"].get("width"), (int, float))
-            assert isinstance(i["body_shape"].get("height"), (int, float))
-            assert isinstance(i.get("inner_text"), str)
-            assert isinstance(i.get("details"), str)
-            assert isinstance(i.get("uuid"), str)
-            assert isinstance(i.get("children"), list)
-            for child_uuid in i.get("children", []):
-                assert isinstance(child_uuid, str)
+        # 先转换
+        if not node_dict_checker.validate_dict(data):
+            file = node_dict_checker.transform_dict_to_2(data)
+            # 以后还可能有其他版本的转换
+            # data = ...
+        else:
+            file = data
 
         # 开始构建节点本身
-        for new_node_dict in data["nodes"]:
+        for new_node_dict in file["nodes"]:
             assert isinstance(new_node_dict, dict)
 
             body_shape_data = new_node_dict["body_shape"]
@@ -318,7 +328,7 @@ class NodeManager:
             self.nodes.append(node)
 
         # 构建节点之间的连接关系 (根据的是children)
-        for new_node_dict in data["nodes"]:
+        for new_node_dict in file["nodes"]:
             node = self.get_node_by_uuid(new_node_dict["uuid"])
             if node is None:
                 continue
@@ -331,7 +341,7 @@ class NodeManager:
                 self._links.add(NodeLink(node, child))
 
         # 补充每个连线上的信息（文字）
-        for link_dict in data.get("links", []):
+        for link_dict in file.get("links", []):
             link = self.get_link_by_uuid(
                 link_dict["source_node"], link_dict["target_node"]
             )
