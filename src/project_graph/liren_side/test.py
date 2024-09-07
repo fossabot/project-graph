@@ -1,33 +1,19 @@
-import platform
+import sys
 
 from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QDesktopWidget, QMainWindow
+from PyQt5.QtWidgets import QApplication, QMainWindow
 
-from project_graph.liren_side.app import App
-from project_graph.liren_side.components import World
+from project_graph.liren_side.app import AppConfig, App
 
 
-def init(window: QMainWindow):
-    # 设置窗口标题和尺寸
-    window.setWindowTitle("节点图编辑器")
-    if platform.system() == "Darwin":
-        window.setWindowIcon(QIcon("assets/favicon.ico"))
-    elif platform.system() == "Windows" or platform.system() == "Linux":
-        window.setWindowIcon(QIcon(":/favicon.ico"))
-    # 获取屏幕可用空间（macOS上会有titlebar占据一部分空间）
-    screen_geometry = QDesktopWidget().availableGeometry()
+class MyConfig(AppConfig):
+    def main_window(self, app: QApplication) -> QMainWindow:
+        app.setWindowIcon(QIcon("./assets/favicon.ico"))
+        # 只在这里导入主窗口，防止最开始导入，一些东西没初始化好
+        from project_graph.ui.main_window.main_window import Canvas
 
-    # 计算新的宽度和高度（长宽各取屏幕的百分之八十）
-    new_width = screen_geometry.width() * 0.8
-    new_height = screen_geometry.height() * 0.8
-
-    # 计算窗口应该移动到的新位置
-    new_left = (screen_geometry.width() - new_width) / 2
-    new_top = (screen_geometry.height() - new_height) / 2 + screen_geometry.top()
-
-    # 移动窗口到新位置
-    window.setGeometry(int(new_left), int(new_top), int(new_width), int(new_height))
+        return Canvas()
 
 
 if __name__ == "__main__":
-    App(World(), init=init).run()
+    App.create(MyConfig()).run()

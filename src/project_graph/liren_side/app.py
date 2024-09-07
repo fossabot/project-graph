@@ -1,3 +1,4 @@
+from abc import ABCMeta, abstractmethod
 import sys
 from pathlib import Path
 from typing import Callable
@@ -30,12 +31,19 @@ class _NativeWindow(QMainWindow):
         self.root.keyReleaseEvent(self, a0)
 
 
+class AppConfig(metaclass=ABCMeta):
+    @abstractmethod
+    def main_window(self, application: QApplication) -> QMainWindow:
+        pass
+
+
 class App:
-    def __init__(
-        self, root: Component, init: Callable[[QMainWindow], None] = lambda _: None
-    ):
+    __creat_key = object()
+
+    def __init__(self, create_key: object, config: AppConfig):
+        assert create_key == App.__creat_key, "the constructor of App is private"
         self.__app = QApplication(sys.argv)
-        self.__window = _NativeWindow(root, init)
+        self.__window = config.main_window(self.__app)
 
     def run(self):
         self.__window.show()
@@ -47,3 +55,7 @@ class App:
         if not Path(data_dir).exists():
             Path(data_dir).mkdir(parents=True, exist_ok=True)
         return data_dir
+
+    @staticmethod
+    def create(config: AppConfig) -> "App":
+        return App(App.__creat_key, config)
