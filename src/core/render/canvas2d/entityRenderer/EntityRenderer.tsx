@@ -1,18 +1,18 @@
+import { replaceTextWhenProtect } from "../../../../utils/font";
+import { Random } from "../../../algorithm/random";
 import { Color } from "../../../dataStruct/Color";
 import { Rectangle } from "../../../dataStruct/shape/Rectangle";
 import { Vector } from "../../../dataStruct/Vector";
-import { TextNode } from "../../../stageObject/entity/TextNode";
 import { Camera } from "../../../stage/Camera";
+import { ConnectPoint } from "../../../stageObject/entity/ConnectPoint";
+import { ImageNode } from "../../../stageObject/entity/ImageNode";
+import { Section } from "../../../stageObject/entity/Section";
+import { TextNode } from "../../../stageObject/entity/TextNode";
+import { StageStyleManager } from "../../../stageStyle/StageStyleManager";
+import { ImageRenderer } from "../ImageRenderer";
 import { Renderer } from "../renderer";
 import { RenderUtils } from "../RenderUtils";
-import { Section } from "../../../stageObject/entity/Section";
 import { CollisionBoxRenderer } from "./CollisionBoxRenderer";
-import { ConnectPoint } from "../../../stageObject/entity/ConnectPoint";
-import { replaceTextWhenProtect } from "../../../../utils/font";
-import { Random } from "../../../algorithm/random";
-import { StageStyleManager } from "../../../stageStyle/StageStyleManager";
-import { ImageNode } from "../../../stageObject/entity/ImageNode";
-import { ImageRenderer } from "../ImageRenderer";
 
 /**
  * 处理节点相关的绘制
@@ -228,8 +228,8 @@ export namespace EntityRenderer {
         Color.White,
       );
     } else if (imageNode.state === "success") {
-      ImageRenderer.renderImageElement(
-        imageNode.imageElement,
+      ImageRenderer.renderImageData(
+        imageNode.imageData,
         Renderer.transformWorld2View(imageNode.rectangle.location),
       );
     } else if (imageNode.state === "error") {

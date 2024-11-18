@@ -6,6 +6,7 @@ use base64::{decode, encode};
 use std::env;
 use std::fs::read; // 引入 read 函数用于读取文件
 use tauri::Manager; // 引入 base64 编码函数
+use tauri_plugin_fs::FsExt;
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 #[tauri::command]
@@ -55,45 +56,20 @@ fn check_json_exist(path: String) -> bool {
     std::path::Path::new(&path).exists()
 }
 
-// #[tauri::command]
-// fn open_dev_tools() {
-//     let window = app.get_webview_window("main").unwrap();
-//     window.open_devtools();
-// }
-
 #[tauri::command]
-fn convert_image_to_base64(image_path: String) -> Result<String, String> {
-    match read(&image_path) {
-        Ok(image_data) => {
-            let base64_str = encode(&image_data);
-            Ok(base64_str)
-        }
-        Err(e) => Err(format!("无法读取文件: {}, {}", e, image_path)),
-    }
-}
+fn expand_scope(app_handle: tauri::AppHandle, folder_path: std::path::PathBuf) {
+  // If possible, verify your path if it comes from your frontend.
 
-/// 将base64编码字符串保存为图片文件
-#[tauri::command]
-fn save_base64_to_image(base64_str: &str, file_name: &str) -> Result<(), String> {
-    // 进行解码
-    match decode(base64_str) {
-        Ok(image_data) => {
-            // 创建文件并写入数据
-            let mut file = File::create(file_name).map_err(|e| format!("无法创建文件: {}", e))?;
-            file.write_all(&image_data)
-                .map_err(|e| format!("无法写入文件: {}", e))?;
-            Ok(())
-        }
-        Err(e) => Err(format!("解码失败: {}", e)),
-    }
+  // true means that we want inner directories allowed too
+  app_handle.fs_scope().allow_directory(&folder_path, true);
 }
-
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     println!("程序运行了！");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .setup(|app| {
             #[cfg(debug_assertions)] // only include this code on debug builds
@@ -110,9 +86,8 @@ pub fn run() {
             set_env_value,
             open_json_by_path,
             save_json_by_path,
-            convert_image_to_base64,
-            save_base64_to_image,
-            check_json_exist // open_dev_tools
+            check_json_exist, // open_dev_tools
+            expand_scope
         ])
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_fs::init())

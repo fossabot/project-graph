@@ -26,3 +26,4 @@ tauri-plugin-store = "2.0.0"
 tauri-plugin-http = "2"
 
 base64 = "0.22.1"
+tauri-plugin-clipboard-manager = "2.0.2"

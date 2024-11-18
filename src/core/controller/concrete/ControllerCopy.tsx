@@ -1,18 +1,20 @@
+import { invoke } from "@tauri-apps/api/core";
+import { join } from "@tauri-apps/api/path";
+import { readImage } from "@tauri-apps/plugin-clipboard-manager";
+import { writeFile } from "@tauri-apps/plugin-fs";
+import { v4 } from "uuid";
+import { PathString } from "../../../utils/pathString";
 import { Rectangle } from "../../dataStruct/shape/Rectangle";
 import { Vector } from "../../dataStruct/Vector";
-import { TextNode } from "../../stageObject/entity/TextNode";
 import { Renderer } from "../../render/canvas2d/renderer";
 import { Stage } from "../../stage/Stage";
 import { StageDumper } from "../../stage/StageDumper";
 import { StageSerializedAdder } from "../../stage/stageManager/concreteMethods/StageSerializedAdder";
 import { StageManager } from "../../stage/stageManager/StageManager";
+import { ImageNode } from "../../stageObject/entity/ImageNode";
+import { Entity } from "../../stageObject/StageObject";
 import { Controller } from "../Controller";
 import { ControllerClass } from "../ControllerClass";
-import { v4 as uuidv4 } from "uuid";
-import { Entity } from "../../stageObject/StageObject";
-import { ImageNode } from "../../stageObject/entity/ImageNode";
-import { invoke } from "@tauri-apps/api/core";
-import { PathString } from "../../../utils/pathString";
 
 /**
  * 关于复制相关的功能
@@ -133,65 +135,22 @@ ControllerCopy.keydown = (event: KeyboardEvent) => {
 // }
 
 async function readClipboardItems(mouseLocation: Vector) {
-  // test
-  try {
-    navigator.clipboard.read().then(async (items) => {
-      for (const item of items) {
-        if (item.types.includes("image/png")) {
-          const blob = await item.getType(item.types[0]); // 获取 Blob 对象
-          const base64String = await convertBlobToBase64(blob); // 转换为 Base64 字符串
-          const imageUUID = uuidv4();
-          const folder = PathString.dirPath(Stage.Path.getFilePath());
-          const imagePath = `${folder}${Stage.Path.getSep()}${imageUUID}.png`;
-
-          invoke<string>("save_base64_to_image", {
-            base64Str: base64String,
-            fileName: imagePath,
-          })
-            .then(() => {
-              console.log("save image to file success");
-
-              // 要延迟一下，等待保存完毕
-              setTimeout(() => {
-                const imageNode = new ImageNode({
-                  uuid: imageUUID,
-                  location: [mouseLocation.x, mouseLocation.y],
-                  path: `${imageUUID}.png`,
-                });
-                // imageNode.setBase64StringForced(base64String);
-                StageManager.addImageNode(imageNode);
-              }, 100);
-            })
-            .catch((error) => {
-              console.error("save image to file error", error);
-            });
-        }
-        if (item.types.includes("text/plain")) {
-          const blob = await item.getType("text/plain"); // 获取文本内容
-          // const text = await blob.text();
-          const text = await blobToText(blob); // 将 Blob 转换为文本
-          console.log("Text:", text);
-          const textNode = new TextNode({
-            uuid: uuidv4(),
-            text: text,
-            location: [mouseLocation.x, mouseLocation.y],
-            size: [100, 100],
-            color: [0, 0, 0, 0],
-          });
-          textNode.move(
-            new Vector(
-              -textNode.rectangle.size.x / 2,
-              -textNode.rectangle.size.y / 2,
-            ),
-          );
-          StageManager.addTextNode(textNode);
-        }
-      }
-      console.log("read clipboard contents");
-    });
-  } catch (err) {
-    console.error("Failed to read clipboard contents: ", err);
-  }
+  const image = await readImage();
+  const size = await image.size();
+  const uuid = v4();
+  const path = await join(PathString.dirPath(Stage.Path.getFilePath()), uuid);
+  console.log(path);
+  await invoke("expand_scope", {
+    folderPath: PathString.dirPath(Stage.Path.getFilePath()),
+  });
+  await writeFile(path, await image.rgba());
+  const imageNode = new ImageNode({
+    uuid,
+    location: [mouseLocation.x, mouseLocation.y],
+    size: [size.width, size.height],
+    path: uuid,
+  });
+  StageManager.addImageNode(imageNode);
 }
 
 function blobToText(blob: Blob): Promise<string> {

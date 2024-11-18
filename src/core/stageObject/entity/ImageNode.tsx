@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
+import { join } from "@tauri-apps/api/path";
+import { readFile } from "@tauri-apps/plugin-fs";
 import { Serialized } from "../../../types/node";
+import { PathString } from "../../../utils/pathString";
 import { Rectangle } from "../../dataStruct/shape/Rectangle";
 import { Vector } from "../../dataStruct/Vector";
+import { Stage } from "../../stage/Stage";
 import { CollisionBox } from "../collisionBox/collisionBox";
 import { ConnectableEntity } from "../StageObject";
-import { Stage } from "../../stage/Stage";
-import { PathString } from "../../../utils/pathString";
 
 /**
  * 一个图片节点
@@ -54,10 +56,10 @@ export class ImageNode extends ConnectableEntity {
    */
   public state: "loading" | "success" | "error" = "loading";
 
-  private _imageElement: HTMLImageElement = new Image();
+  private _imageData: ImageData;
 
-  public get imageElement(): HTMLImageElement {
-    return this._imageElement;
+  public get imageData() {
+    return this._imageData;
   }
 
   constructor(
@@ -84,7 +86,7 @@ export class ImageNode extends ConnectableEntity {
     } else {
       // 一般只有在粘贴板粘贴时和初次打开文件时才调用这里
       // 所以这里只可能时初次打开文件时还是草稿的状态
-      
+
       setTimeout(() => {
         this.updateBase64StringByPath(
           PathString.dirPath(Stage.Path.getFilePath()),
@@ -98,43 +100,32 @@ export class ImageNode extends ConnectableEntity {
    * @param folderPath 工程文件所在路径文件夹，不加尾部斜杠
    * @returns
    */
-  public updateBase64StringByPath(folderPath: string) {
+  public async updateBase64StringByPath(folderPath: string) {
     if (this.path === "") {
       return;
     }
-
-    invoke<string>("convert_image_to_base64", {
-      imagePath: `${folderPath}\\${this.path}`,
-    })
-      .then((res) => {
-        // 获取base64String成功
-
-        this._base64String = res;
-        const imageElement = new Image();
-        this._imageElement = imageElement;
-        imageElement.src = `data:image/png;base64,${this._base64String}`;
-        imageElement.onload = () => {
-          // 图片加载成功
-          console.log("图片加载成功");
-
-          // 调整碰撞箱大小
-
-          this.rectangle.size = new Vector(
-            imageElement.width / (window.devicePixelRatio || 1),
-            imageElement.height / (window.devicePixelRatio || 1),
-          );
-          this.state = "success";
-        };
-        imageElement.onerror = () => {
-          console.log("图片加载失败");
-          this.state = "error";
-        };
-      })
-      .catch((err) => {
-        // 获取base64String失败
-        console.log("图片可能不存在？", err);
-        this.state = "error";
-      });
+    await invoke("expand_scope", {
+      folderPath: PathString.dirPath(Stage.Path.getFilePath()),
+    });
+    console.log(await join(folderPath, this.path));
+    const file = await readFile(await join(folderPath, this.path));
+    const blob = new Blob([file], { type: "image" });
+    const reader = new FileReader();
+    reader.readAsDataURL(blob);
+    await new Promise((resolve, reject) => {
+      reader.onload = resolve;
+      reader.onerror = reject;
+    });
+    this._base64String = reader.result as string;
+    this._imageData = new ImageData(new Uint8ClampedArray(file), 100, 100);
+    // 图片加载成功
+    console.log("图片加载成功");
+    // 调整碰撞箱大小
+    this.rectangle.size = new Vector(
+      imageElement.width / (window.devicePixelRatio || 1),
+      imageElement.height / (window.devicePixelRatio || 1),
+    );
+    this.state = "success";
   }
 
   /**
